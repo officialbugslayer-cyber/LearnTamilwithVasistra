@@ -28,7 +28,7 @@
     const host = document.querySelector('#active-quiz');
     let answers = Array(7).fill(null), matchChoices = set.pairs.map(pair=>pair[1]).sort(()=>Math.random()-.5), finished=false;
     const render = () => {
-      host.innerHTML = `<div class="active-quiz-card"><div class="active-quiz-heading"><div><p class="mini-label">${set.title.toUpperCase()}</p><h3>Four ways to practise</h3></div><button class="quiz-close" aria-label="Close quiz">×</button></div><div class="quiz-step"><strong>1–4 · Choose an answer</strong>${set.items.map((item,i)=>`<fieldset class="quiz-question"><legend>${i===3?'🔊 Listen & choose · ':''}${item[0]} ${i===3?'<button type="button" class="speaker-button" aria-label="Play audio placeholder">🔊</button>':''}</legend><div class="quiz-options">${item[1].map((option,j)=>`<button class="quiz-option ${answers[i]===j?'chosen':''}" data-q="${i}" data-a="${j}">${option}</button>`).join('')}</div></fieldset>`).join('')}</div><div class="quiz-step"><strong>5 · Match the following</strong><div class="match-grid">${set.pairs.map((pair,i)=>`<div class="match-row"><span class="match-prompt" lang="ta">${pair[0]} <button type="button" class="speaker-button" aria-label="Play audio placeholder">🔊</button></span><select data-match="${i}" aria-label="Match ${pair[0]}"><option value="">Choose meaning…</option>${matchChoices.map(choice=>`<option ${answers[4+i]===choice?'selected':''}>${choice}</option>`).join('')}</select></div>`).join('')}</div></div><div class="quiz-step"><strong>6 · Fill in the blank</strong><label class="fill-question">${set.blank}<input data-fill type="text" value="${answers[7]||''}" placeholder="Your answer" autocomplete="off"></label></div><div class="quiz-result" aria-live="polite"></div><div class="quiz-actions"><button class="button button-primary" data-submit-quiz>Check my score</button><button class="button button-outline" data-retry-quiz hidden>Try again</button></div></div>`;
+      host.innerHTML = `<div class="active-quiz-card"><div class="active-quiz-heading"><div><p class="mini-label">${set.title.toUpperCase()}</p><h3>Four ways to practise</h3></div><button class="quiz-close" aria-label="Close quiz">×</button></div><div class="quiz-step"><strong>1–4 · Choose an answer</strong>${set.items.map((item,i)=>`<fieldset class="quiz-question"><legend>${i===3?'🔊 Listen & choose · ':''}${item[0]} ${i===3?`<button type="button" class="speaker-button" data-speak="${item[1][item[2]]}" aria-label="Speak Tamil choice">🔊</button>`:''}</legend><div class="quiz-options">${item[1].map((option,j)=>`<button class="quiz-option ${answers[i]===j?'chosen':''}" data-q="${i}" data-a="${j}">${option}</button>`).join('')}</div></fieldset>`).join('')}</div><div class="quiz-step"><strong>5 · Match the following</strong><div class="match-grid">${set.pairs.map((pair,i)=>`<div class="match-row"><span class="match-prompt" lang="ta">${pair[0]} <button type="button" class="speaker-button" data-speak="${pair[0]}" aria-label="Speak Tamil word">🔊</button></span><select data-match="${i}" aria-label="Match ${pair[0]}"><option value="">Choose meaning…</option>${matchChoices.map(choice=>`<option ${answers[4+i]===choice?'selected':''}>${choice}</option>`).join('')}</select></div>`).join('')}</div></div><div class="quiz-step"><strong>6 · Fill in the blank</strong><label class="fill-question">${set.blank}<input data-fill type="text" value="${answers[7]||''}" placeholder="Your answer" autocomplete="off"></label></div><div class="quiz-result" aria-live="polite"></div><div class="quiz-actions"><button class="button button-primary" data-submit-quiz>Check my score</button><button class="button button-outline" data-retry-quiz hidden>Try again</button></div></div>`;
       host.querySelector('.quiz-close').addEventListener('click',()=>{host.innerHTML='';});
       host.querySelectorAll('[data-q]').forEach(button=>button.addEventListener('click',()=>{answers[Number(button.dataset.q)]=Number(button.dataset.a);render();}));
       host.querySelectorAll('[data-match]').forEach(select=>select.addEventListener('change',()=>{answers[4+Number(select.dataset.match)]=select.value;}));
@@ -45,8 +45,63 @@
     };
     render();host.scrollIntoView({behavior:'smooth',block:'start'});
   }
+  let activeAudioButton = null;
+  let activeUtterance = null;
+  function showAudioToast(message) {
+    let toast=document.querySelector('.audio-toast');
+    if(!toast){toast=document.createElement('div');toast.className='audio-toast';toast.setAttribute('role','status');toast.setAttribute('aria-live','polite');document.body.append(toast);}
+    toast.textContent=message;
+    clearTimeout(showAudioToast.timer);
+    showAudioToast.timer=setTimeout(()=>{toast.textContent='';},2200);
+  }
+  function finishTamilAudio(button) {
+    if(!button)return;
+    button.disabled=false;
+    button.classList.remove('audio-playing');
+    button.innerHTML=button.dataset.originalLabel||'🔊';
+    button.setAttribute('aria-label',`Speak Tamil: ${button.dataset.speak||'text'}`);
+    if(activeAudioButton===button){activeAudioButton=null;activeUtterance=null;}
+  }
+  function playTamilAudio(text, button) {
+    const cleanText=String(text||'').trim();
+    if(!cleanText)return;
+    if(!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window)){
+      showAudioToast('Speech audio is not supported in this browser.');
+      return;
+    }
+    if(activeAudioButton){const previous=activeAudioButton;speechSynthesis.cancel();finishTamilAudio(previous);}
+    const voices=speechSynthesis.getVoices();
+    const tamilVoice=voices.find(voice=>/^ta-IN$/i.test(voice.lang))||voices.find(voice=>/^ta(-|$)/i.test(voice.lang))||null;
+    const utterance=new SpeechSynthesisUtterance(cleanText);
+    if(tamilVoice){utterance.voice=tamilVoice;utterance.lang=tamilVoice.lang||'ta-IN';}
+    else {
+      const defaultVoice=voices.find(voice=>voice.default);
+      if(defaultVoice){utterance.voice=defaultVoice;utterance.lang=defaultVoice.lang||'en-US';}
+      else utterance.lang='ta-IN';
+    }
+    utterance.rate=0.82;
+    utterance.onstart=()=>showAudioToast('Playing Tamil pronunciation…');
+    utterance.onend=()=>finishTamilAudio(button);
+    utterance.onerror=()=>{finishTamilAudio(button);showAudioToast('Could not play audio. Please try again.');};
+    if(button){
+      button.dataset.originalLabel=button.dataset.originalLabel||button.innerHTML;
+      button.disabled=true;button.classList.add('audio-playing');button.innerHTML='<span class="speaker-playing">◌</span>';
+      button.setAttribute('aria-label','Playing Tamil pronunciation');
+      activeAudioButton=button;activeUtterance=utterance;
+    }
+    speechSynthesis.speak(utterance);
+  }
   function bindAudio(button) {
-    button.addEventListener('click',()=>{button.classList.add('audio-playing');const original=button.dataset.originalLabel||button.innerHTML;button.dataset.originalLabel=original;let toast=document.querySelector('.audio-toast');if(!toast){toast=document.createElement('div');toast.className='audio-toast';toast.setAttribute('role','status');toast.setAttribute('aria-live','polite');document.body.append(toast);}toast.textContent='Audio coming soon';if(!button.classList.contains('speaker-button'))button.innerHTML='<span>◌</span> Audio coming soon';setTimeout(()=>{button.classList.remove('audio-playing');if(!button.classList.contains('speaker-button'))button.innerHTML=original;toast.textContent='';},1200);});
+    if(button.dataset.audioBound==='true')return;
+    button.dataset.audioBound='true';
+    if(!button.dataset.speak){
+      const tamilContainer=button.closest('[lang="ta"]');
+      const parent=button.closest('.story-card,.flashcard-wrap,.writing-card,.case-grid,.pair-examples');
+      const source=tamilContainer||parent?.querySelector('.story-tamil,.flashcard-tamil,.flashcard-example,.dictation-prompt,.case-grid p,.pair-examples p');
+      button.dataset.speak=(source?.textContent||'').replace(/🔊|◌/g,'').trim();
+    }
+    button.setAttribute('aria-label',`Speak Tamil: ${button.dataset.speak||'text'}`);
+    button.addEventListener('click',()=>playTamilAudio(button.dataset.speak,button));
   }
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
   const write = value => localStorage.setItem(KEY, JSON.stringify(value));
@@ -91,7 +146,7 @@
   function render() {
     const lesson=lessons[current], done=completed(), isDone=done.includes(current);
     renderList();
-    content.innerHTML = `<div class="lesson-card"><div class="lesson-meta"><span class="lesson-tag">${lesson.tag}</span><span class="lesson-index">LESSON ${String(current+1).padStart(2,'0')} / ${String(lessons.length).padStart(2,'0')}</span></div><h2>${lesson.title}</h2><p class="lesson-intro">${lesson.intro}</p><div class="objectives"><h3>By the end of this lesson, you can…</h3><ul>${lesson.objectives.map(o=>`<li>${o}</li>`).join('')}</ul></div><div class="lesson-divider"></div><div class="section-label-row"><div><p class="mini-label">LEARN & EXPLORE</p><h3>Say it, see it, remember it.</h3></div><button class="audio-button" type="button" aria-label="Audio pronunciation placeholder"><span>▶</span> Listen to the sounds</button></div><div class="flashcard-grid">${lesson.cards.map((card,i)=>`<div class="flashcard-wrap"><button class="flashcard" type="button" aria-pressed="false"><span class="flashcard-index">0${i+1}</span><span class="flashcard-tamil" lang="ta">${card[0]}</span><span class="flashcard-pronunciation">${card[1]}</span><span class="flashcard-example">${card[2]}</span><span class="flashcard-hint">Tap to flip</span></button><button class="speaker-button flashcard-audio" aria-label="Audio coming soon">🔊</button></div>`).join('')}</div><p class="practice-note">${lesson.practice}</p><div class="quiz-box"><div class="quiz-heading"><span class="quiz-icon">?</span><div><p class="mini-label">QUICK CHECK</p><h3>${lesson.question}</h3></div></div><div class="quiz-options">${lesson.options.map((o,i)=>`<button class="quiz-option" data-option="${i}">${o}</button>`).join('')}</div><p class="quiz-feedback" aria-live="polite"></p></div><div class="lesson-actions"><button class="button button-outline" data-prev ${current===0?'disabled':''}>← Previous</button><button class="button ${isDone?'button-completed':'button-primary'}" data-complete>${isDone?'✓ Lesson completed':'Mark as complete'}</button><button class="button button-outline" data-next ${current===lessons.length-1?'disabled':''}>Next lesson →</button></div></div>`;
+    content.innerHTML = `<div class="lesson-card"><div class="lesson-meta"><span class="lesson-tag">${lesson.tag}</span><span class="lesson-index">LESSON ${String(current+1).padStart(2,'0')} / ${String(lessons.length).padStart(2,'0')}</span></div><h2>${lesson.title}</h2><p class="lesson-intro">${lesson.intro}</p><div class="objectives"><h3>By the end of this lesson, you can…</h3><ul>${lesson.objectives.map(o=>`<li>${o}</li>`).join('')}</ul></div><div class="lesson-divider"></div><div class="section-label-row"><div><p class="mini-label">LEARN & EXPLORE</p><h3>Say it, see it, remember it.</h3></div><button class="audio-button" type="button" data-speak="${lesson.cards[0][0]}" aria-label="Speak Tamil letter or word"><span>▶</span> Listen to the sounds</button></div><div class="flashcard-grid">${lesson.cards.map((card,i)=>`<div class="flashcard-wrap"><button class="flashcard" type="button" aria-pressed="false"><span class="flashcard-index">0${i+1}</span><span class="flashcard-tamil" lang="ta">${card[0]}</span><span class="flashcard-pronunciation">${card[1]}</span><span class="flashcard-example">${card[2]}</span><span class="flashcard-hint">Tap to flip</span></button><button class="speaker-button flashcard-audio" data-speak="${card[0]}" aria-label="Speak Tamil: ${card[0]}">🔊</button>${/[\u0B80-\u0BFF]/.test(card[2])?`<button class="speaker-button flashcard-example-audio" data-speak="${card[2].split(' · ')[0]}" aria-label="Speak Tamil example">🔊</button>`:''}</div>`).join('')}</div><p class="practice-note">${lesson.practice}</p><div class="quiz-box"><div class="quiz-heading"><span class="quiz-icon">?</span><div><p class="mini-label">QUICK CHECK</p><h3>${lesson.question}</h3></div></div><div class="quiz-options">${lesson.options.map((o,i)=>`<button class="quiz-option" data-option="${i}">${o}</button>`).join('')}</div><p class="quiz-feedback" aria-live="polite"></p></div><div class="lesson-actions"><button class="button button-outline" data-prev ${current===0?'disabled':''}>← Previous</button><button class="button ${isDone?'button-completed':'button-primary'}" data-complete>${isDone?'✓ Lesson completed':'Mark as complete'}</button><button class="button button-outline" data-next ${current===lessons.length-1?'disabled':''}>Next lesson →</button></div></div>`;
     content.querySelectorAll('.flashcard').forEach(card=>card.addEventListener('click',()=>{const flipped=card.classList.toggle('flipped');card.setAttribute('aria-pressed',String(flipped));card.querySelector('.flashcard-hint').textContent=flipped?'You’ve got this!':'Tap to flip';}));
     content.querySelectorAll('.quiz-option').forEach(option=>option.addEventListener('click',()=>{const correct=Number(option.dataset.option)===lesson.answer;content.querySelectorAll('.quiz-option').forEach(o=>{o.disabled=true;if(Number(o.dataset.option)===lesson.answer)o.classList.add('correct');});if(!correct)option.classList.add('incorrect');content.querySelector('.quiz-feedback').textContent=correct?'That’s right—well done!':'Not quite. The highlighted answer is the one to remember.';}));
     content.querySelector('[data-complete]').addEventListener('click',()=>{const data=read();data.beginner=Array.isArray(data.beginner)?data.beginner:[];if(!data.beginner.includes(current))data.beginner.push(current);write(data);render();});
